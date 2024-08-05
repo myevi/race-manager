@@ -1,8 +1,18 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestMain(t *testing.T) {
-	_, err := parsePDF("silverstone2024.pdf")
-	t.Errorf("some err: %w", err)
+	res, err := parsePDF("silverstone2024.pdf")
+	if err != nil {
+		t.Log("some err: %w", err)
+		t.Fail()
+	}
+
+	if res == nil {
+		t.Log("empty result")
+		t.Fail()
+	}
 }
