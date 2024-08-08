@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ type LapInfo struct {
 	WasAPit  bool
 	Sectors  []SectorInfo
 	FullTime time.Time
-	NumOfLap int
+	NumOfLap int64
 }
 
 type SectorInfo struct {
@@ -38,8 +39,6 @@ type SectorInfo struct {
 }
 
 func main() {
-	// todo need to parse racer names. now - hardcode
-
 	filename := flag.String("f", "silverstone2024.pdf", "file name to parse")
 	flag.Parse()
 	result, err := parsePDF(*filename)
@@ -52,7 +51,17 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("file successed parsed:\n %s\n", string(res))
+	file, err := os.Create("result.json")
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = file.WriteString(string(res))
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("file successed parsed")
 }
 
 func parsePDF(filename string) (*map[string][]LapInfo, error) {
@@ -76,6 +85,11 @@ func parsePDF(filename string) (*map[string][]LapInfo, error) {
 
 	for i := 0; i < len(rows); i++ {
 		if isLapNumber(rows, i) {
+			// todo: temp skipping laps with pitstop
+			if rows[i+1] == "P" {
+				continue
+			}
+
 			lapData, rowsToSkip, err := setLapData(rows, i)
 			if err != nil {
 				return nil, fmt.Errorf("failed to set lap data: %w", err)
@@ -93,7 +107,10 @@ func parsePDF(filename string) (*map[string][]LapInfo, error) {
 			continue
 		}
 
-		racerName = "unknown"
+		// it is end of file
+		if rows[i] == "Race Sector Analysis" {
+			racerName = "unknown"
+		}
 	}
 
 	return &raceData, nil
@@ -128,14 +145,49 @@ func getRows(reader io.Reader) ([]string, error) {
 func setLapData(rows []string, index int) (*LapInfo, int, error) {
 	lap, _ := strconv.ParseInt(rows[index], 10, 64)
 	result := &LapInfo{
-		NumOfLap: int(lap),
+		NumOfLap: lap,
 	}
 	var sectorData SectorInfo
-	result.WasAPit = rows[index+1] == PitstopSymbol
+	// result.WasAPit = rows[index+1] == PitstopSymbol
+	arrIndex := index
+	// if result.WasAPit {
+	// 	pitTime, err := parseTime(rows[index+2])
+	// 	if err != nil {
+	// 		return nil, 0, fmt.Errorf("failed to parse time on pit lap. value: %s, index: %d, error: %w", rows[arrIndex+1], arrIndex+1, err)
+	// 	}
+
+	// 	sectorData = SectorInfo{
+	// 		Time: pitTime,
+	// 		Num:   FirstSector,
+	// 	}
+
+	// 	result.Sectors = append(result.Sectors, sectorData)
+	// 	arrIndex += 3
+	// 	for i := 0; i < 2; i++ {
+	// 		arrIndex += i * 2
+	// 		sectorData = SectorInfo{}
+	// 		sectorTime, err := parseTime(rows[arrIndex])
+	// 		if err != nil {
+	// 			return nil, 0, fmt.Errorf("failed to parse sector time on pit lap. value: %s, index: %d, error: %w", rows[arrIndex], arrIndex, err)
+	// 		}
+
+	// 		speed, err := parseSpeed(rows[arrIndex+1])
+	// 		if err != nil {
+	// 			return nil, 0, fmt.Errorf("failed to parse speed on pit lap. value: %s, index: %d, error: %w", rows[arrIndex+1], arrIndex+1, err)
+	// 		}
+
+	// 		sectorData.Speed = speed
+	// 		sectorData.Time = sectorTime
+	// 		result.Sectors = append(result.Sectors, sectorData)
+	// 	}
+
+	// 	return result, firstLapSkipRows, nil
+	// }
+
 	if lap == 1 {
 		speed, err := parseSpeed(rows[index+2])
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to parse speed on start grip. value: %s, index: %d, error: %w", rows[arrIndex+1], arrIndex+1, err)
 		}
 
 		sectorData = SectorInfo{
@@ -144,17 +196,18 @@ func setLapData(rows []string, index int) (*LapInfo, int, error) {
 		}
 
 		result.Sectors = append(result.Sectors, sectorData)
-		
-		for i := 3 + index; i < 5+index; i++ {
+		arrIndex += 3
+		for i := 0; i < 2; i++ {
+			arrIndex += i * 2
 			sectorData = SectorInfo{}
-			sectorTime, err := parseSectorTime(rows[i])
+			sectorTime, err := parseTime(rows[arrIndex])
 			if err != nil {
-				return nil, 0, fmt.Errorf("failed to parse sector time. value: %s, index: %d, error: %w", rows[i], i, err)
+				return nil, 0, fmt.Errorf("failed to parse sector time in start lap. value: %s, index: %d, error: %w", rows[arrIndex], arrIndex, err)
 			}
 
-			speed, err := parseSpeed(rows[i+1])
+			speed, err := parseSpeed(rows[arrIndex+1])
 			if err != nil {
-				return nil, 0, err
+				return nil, 0, fmt.Errorf("failed to parse speed on first lap. value: %s, index: %d, error: %w", rows[arrIndex+1], arrIndex+1, err)
 			}
 
 			sectorData.Speed = speed
@@ -165,18 +218,21 @@ func setLapData(rows []string, index int) (*LapInfo, int, error) {
 		return result, firstLapSkipRows, nil
 	}
 
-	for i := 2 + index; i < 5+index; i++ {
+	arrIndex += 2
+	for i := 0; i < 3; i++ {
+		arrIndex += i * 2
+		// todo: refactor this
 		sectorData = SectorInfo{
 			Num: i - 1,
 		}
-		sectorTime, err := parseSectorTime(rows[i])
+		sectorTime, err := parseTime(rows[arrIndex])
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to parse sector time. value: %s, index: %d, error: %w", rows[i], i, err)
+			return nil, 0, fmt.Errorf("failed to parse sector time. value: %s, index: %d, error: %w", rows[arrIndex], arrIndex, err)
 		}
 
-		speed, err := parseSpeed(rows[i+1])
+		speed, err := parseSpeed(rows[arrIndex+1])
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to parse speed. value: %s, index: %d, error: %w", rows[arrIndex+1], arrIndex+1, err)
 		}
 
 		sectorData.Speed = speed
@@ -184,6 +240,12 @@ func setLapData(rows []string, index int) (*LapInfo, int, error) {
 		result.Sectors = append(result.Sectors, sectorData)
 	}
 
+	fullTime, err := parseTime(rows[arrIndex+1])
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse whole lap time: %w", err)
+	}
+
+	result.FullTime = fullTime
 	return result, lapSkipRows, nil
 }
 
@@ -203,19 +265,21 @@ func isLapNumber(rows []string, index int) bool {
 
 func isRacerNumber(value string) bool {
 	arrName := strings.Split(value, " ")
-	return len(arrName) == 2
+	return len(arrName) == 2 && arrName[0] != "SECTOR"
 }
 
-func parseSectorTime(value string) (time.Time, error) {
-	parsedTime, err := time.Parse("4:05.999", value)
+func parseTime(value string) (time.Time, error) {
+	var result time.Time
+	result, err := time.Parse("4:05.999", value)
 	if err != nil {
-		parsedTime, err = time.Parse("05.999", value)
+		result, err = time.Parse("05.999", value)
 		if err != nil {
 			return time.Time{}, err
 		}
+
 	}
 
-	return parsedTime, nil
+	return result, nil
 }
 
 func parseSpeed(value string) (float64, error) {
