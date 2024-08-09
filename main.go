@@ -61,9 +61,6 @@ func (r *RaceData) parseRacerData(sourceData []string) error {
 	for i := 0; i < len(sourceData); i++ {
 
 		if isLapNumber(sourceData, index) {
-			if rows[i+1] == "P" {
-				continue
-			}
 
 			lapData, rowsToSkip, err := setLapData(rows, i)
 			if err != nil {
@@ -102,12 +99,12 @@ func getSourceDataFromPage(page pdf.Page) ([]string, error) {
 	result := make([]string, 0)
 	for _, col := range columns {
 		for _, content := range col.Content {
-			rowValue := content.S
-			if len(rowValue) == 0 {
+			
+			if len(content.S) == 0 {
 				continue
 			}
 
-			result = append(result, rowValue)
+			result = append(result, content.S)
 		}
 
 	}
