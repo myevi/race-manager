@@ -33,7 +33,7 @@ type SectorInfo struct {
 }
 
 func main() {
-	filename := flag.String("f", "silverstone2024.pdf", "file name to parse")
+	filename := flag.String("f", "sources/silverstone2024.pdf", "file name to parse")
 	flag.Parse()
 
 	err := parsePDF(*filename)
