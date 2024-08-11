@@ -2,13 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dslipak/pdf"
 )
@@ -23,7 +22,6 @@ const (
 type LapInfo struct {
 	Pit      bool
 	Sectors  []SectorInfo
-	FullTime time.Time
 	NumOfLap int64
 }
 
@@ -61,11 +59,13 @@ func parsePDF(filename string) error {
 			return fmt.Errorf("failed to parse racer data. page: %d, err: %w", i, err)
 		}
 	}
+
 	err = raceData.writeToFile()
 	if err != nil {
 		return fmt.Errorf("failed to write data into file: %w", err)
 	}
 
+	slog.Info("file parsed success. check result.json")
 	return nil
 }
 
@@ -120,15 +120,29 @@ func setLapData(data []string, index *int) (*LapInfo, error) {
 	lapInfo := &LapInfo{
 		NumOfLap: lap,
 	}
+	lapInfo.Pit = data[k+1] == PitstopLetter
 
 	var (
 		startIndex int
 		endIndex   int
+		numSector  int = 1
 	)
 	switch {
 	case data[*index+1] == PitstopLetter:
+		sectorTime, err := parseTime(data[k+6])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse third sector time on pit. value: %s, index: %d, error: %w", data[k+6], k+6, err)
+		}
+
+		sectorData := SectorInfo{
+			Time: sectorTime,
+			Num:  ThirdSector,
+		}
+
+		lapInfo.Sectors = append(lapInfo.Sectors, sectorData)
+		startIndex = 2
+		endIndex = 5
 		*index += 7
-		return &LapInfo{}, nil
 	case isLapNumber(data, *index+8):
 		speed, err := parseSpeed(data[k+2])
 		if err != nil {
@@ -144,6 +158,7 @@ func setLapData(data []string, index *int) (*LapInfo, error) {
 		startIndex = 3
 		endIndex = 7
 		*index += 7
+		numSector++
 	default:
 		startIndex = 2
 		endIndex = 7
@@ -151,7 +166,10 @@ func setLapData(data []string, index *int) (*LapInfo, error) {
 	}
 
 	for i := startIndex; i < endIndex; i++ {
-		sectorData := SectorInfo{}
+		sectorData := SectorInfo{
+			Num: numSector,
+		}
+		numSector++
 		sectorTime, err := parseTime(data[i+k])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse sector time. value: %s, index: %d, error: %w", data[i+k], i+k, err)
@@ -183,7 +201,7 @@ func parseSpeed(value string) (float64, error) {
 func isRacerNumber(value []string, index *int) bool {
 	arrName := strings.Split(value[*index+1], " ")
 	if len(arrName) == 2 && arrName[0] != "SECTOR" {
-		*index += 11
+		*index += 12
 		return true
 	}
 
@@ -196,7 +214,6 @@ func isLapNumber(data []string, index int) bool {
 		return false
 	}
 
-	// check racer name
 	arrName := strings.Split(data[index+1], " ")
 	if len(arrName) == 2 && arrName[0] != "SECTOR" {
 		return false
@@ -221,7 +238,6 @@ func getSourceDataFromPage(page pdf.Page) ([]string, error) {
 	result := make([]string, 0)
 	for _, col := range columns {
 		for _, content := range col.Content {
-
 			if len(content.S) == 0 {
 				continue
 			}
@@ -235,29 +251,16 @@ func getSourceDataFromPage(page pdf.Page) ([]string, error) {
 }
 
 func parseTime(value string) (result uint64, err error) {
-	timeSlice := strings.Split(value, ":")
-
-	var timeValue time.Time
-	switch {
-	// time = xx.xxx
-	case len(timeSlice) == 1:
-		timeValue, err = time.Parse("05.999", value)
-		if err != nil {
-			return 0, fmt.Errorf("failed to parse time by layout 05.999: %w", err)
-		}
-	// time = xx:xx.xxx
-	case len(timeSlice) == 2:
-		timeValue, err = time.Parse("4:05.999", value)
-		if err != nil {
-			return 0, fmt.Errorf("failed to parse time by layout 4:05.999: %w", err)
-		}
-	default:
-		return 0, errors.New("unknown layout of time")
+	isTime, _ := regexp.MatchString(`^(?:\d{1,3}:)?\d{2}[.]\d{3}$`, value)
+	if !isTime {
+		return 0, fmt.Errorf("unknow layout of time: %s", value)
 	}
 
-	result += uint64(timeValue.Nanosecond() / 1e6)
-	result += uint64(timeValue.Second() * 1e1)
-	result += uint64(timeValue.Minute() * 1e1 * 60)
+	timeSlice := strings.Split(value, ".")
+	seconds, _ := strconv.ParseInt(timeSlice[0], 10, 64)
+	millies, _ := strconv.ParseInt(timeSlice[1], 10, 64)
+	result = uint64(seconds * 1e3)
+	result += uint64(millies)
 
 	return
 }

@@ -26,7 +26,7 @@ const (
 )
 
 type LapInfo struct {
-	Pit  bool
+	Pit      bool
 	Sectors  []SectorInfo
 	FullTime time.Time
 	NumOfLap int64
