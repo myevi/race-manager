@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,7 +33,10 @@ type SectorInfo struct {
 }
 
 func main() {
-	err := parsePDF("silverstone2024.pdf")
+	filename := flag.String("f", "silverstone2024.pdf", "file name to parse")
+	flag.Parse()
+
+	err := parsePDF(*filename)
 	if err != nil {
 		panic(err)
 	}
@@ -253,7 +257,7 @@ func getSourceDataFromPage(page pdf.Page) ([]string, error) {
 func parseTime(value string) (result uint64, err error) {
 	isTime, _ := regexp.MatchString(`^(?:\d{1,3}:)?\d{2}[.]\d{3}$`, value)
 	if !isTime {
-		return 0, fmt.Errorf("unknow layout of time: %s", value)
+		return 0, fmt.Errorf("unknown layout of time: %s", value)
 	}
 
 	timeSlice := strings.Split(value, ".")

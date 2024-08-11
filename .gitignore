@@ -23,3 +23,7 @@ go.work.sum
 
 # Parsing result
 result.json
+
+# some files
+launch.json
+**/.DS_Store
